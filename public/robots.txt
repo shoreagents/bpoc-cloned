@@ -1,0 +1,10 @@
+# Allow all crawlers
+User-agent: *
+Allow: /
+
+# Specifically allow OG image generation endpoints
+Allow: /api/og/*
+
+# Sitemap
+Sitemap: https://www.bpoc.io/sitemap.xml
+

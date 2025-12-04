@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "src/app/api/resume/export-pdf/route.ts": {
+      "maxDuration": 60,
+      "memory": 2048
+    }
+  }
+}
+
