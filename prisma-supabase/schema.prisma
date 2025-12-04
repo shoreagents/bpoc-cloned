@@ -1,0 +1,13 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/@prisma/client-supabase"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("SUPABASE_DATABASE_URL")
+  directUrl = env("SUPABASE_DIRECT_URL")
+}
+
+// No models defined yet - Supabase database is empty
+// When ready to migrate, copy models from prisma/schema.prisma
