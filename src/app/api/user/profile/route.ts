@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCandidateById, updateCandidate } from '@/lib/db/candidates'
-import { getProfileByCandidate, updateProfile } from '@/lib/db/profiles'
+import { getCandidateById } from '@/lib/db/candidates'
+import { getProfileByCandidate } from '@/lib/db/profiles'
 import { notifyN8nNewUser } from '@/lib/n8n'
-import { supabaseAdmin } from '@/lib/supabase/admin'
 
 // GET - Fetch user profile from SUPABASE
 export async function GET(request: NextRequest) {
@@ -77,6 +76,7 @@ export async function GET(request: NextRequest) {
       errorType: typeof error,
       errorString: String(error),
       errorJSON: JSON.stringify(error),
+      userId: userId,
       timestamp: new Date().toISOString()
     })
     
@@ -106,158 +106,370 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// PUT - Update user profile in SUPABASE (NO MORE RAILWAY!)
+// PUT - Update user profile in Railway
 export async function PUT(request: NextRequest) {
-  console.log('🚀 PUT /api/user/profile - Updating in SUPABASE ONLY')
+  console.log('🚀🚀🚀 PUT /api/user/profile CALLED - This should appear in server console!')
+  console.log('🚀 DEBUG: PUT /api/user/profile called!')
   try {
     const { userId, ...updateData } = await request.json()
-    console.log('📊 Update data received:', { userId, updateData })
+    console.log('🚀 DEBUG: Request data received:', { userId, updateData })
 
     if (!userId) {
+      console.log('🚀 DEBUG: No userId provided, returning error')
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 })
     }
+    console.log('🚀 DEBUG: UserId validation passed, continuing...')
 
-    console.log('🔄 Updating profile in SUPABASE for user:', userId)
+    console.log('🔄 API: Updating profile for user:', userId)
+    console.log('📊 API: Update data received:', updateData)
+    console.log('📊 API: Company field:', updateData.company)
+    console.log('📊 API: Phone field:', updateData.phone)
+    console.log('📊 API: Bio field:', updateData.bio)
+    console.log('📊 API: Position field:', updateData.position)
+    console.log('📊 API: Birthday field:', updateData.birthday)
+    console.log('📊 API: Gender field:', updateData.gender)
 
-    // Get existing candidate and profile from Supabase
-    const existingCandidate = await getCandidateById(userId)
-    if (!existingCandidate) {
-      console.log('❌ Candidate not found in Supabase:', userId)
+    // First, check what columns actually exist in the users table
+    const colsRes = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users'`
+    )
+    const available = new Set<string>(colsRes.rows.map((r: any) => r.column_name))
+    console.log('🔍 Available columns in users table:', Array.from(available))
+
+    // Build SELECT query dynamically based on available columns
+    const selectFields = ['first_name', 'last_name', 'full_name', 'location', 'avatar_url', 'phone', 'bio', 'position', 'completed_data', 'birthday']
+    // Optional structured location fields
+    if (available.has('location_place_id')) selectFields.push('location_place_id')
+    if (available.has('location_lat')) selectFields.push('location_lat')
+    if (available.has('location_lng')) selectFields.push('location_lng')
+    if (available.has('location_city')) selectFields.push('location_city')
+    if (available.has('location_province')) selectFields.push('location_province')
+    if (available.has('location_country')) selectFields.push('location_country')
+    if (available.has('location_barangay')) selectFields.push('location_barangay')
+    if (available.has('location_region')) selectFields.push('location_region')
+    if (available.has('gender')) selectFields.push('gender')
+    if (available.has('gender_custom')) selectFields.push('gender_custom')
+    if (available.has('username')) selectFields.push('username')
+    if (available.has('company')) selectFields.push('company')
+    if (available.has('admin_level')) selectFields.push('admin_level')
+    
+    const selectQuery = `SELECT ${selectFields.join(', ')} FROM users WHERE id = $1`
+    console.log('🔍 SELECT query:', selectQuery)
+    
+    try {
+      const existingRes = await pool.query(selectQuery, [userId])
+      console.log('✅ SELECT query executed successfully')
+      
+      if (existingRes.rows.length === 0) {
+        console.log('🚀 DEBUG: User not found in work status table, returning error')
+        console.log('❌ API: User not found for update:', userId)
+        return NextResponse.json({ error: 'User not found' }, { status: 404 })
+      }
+      console.log('🚀 DEBUG: User found in work status table, continuing...')
+
+      const existing = existingRes.rows[0]
+      console.log('📊 Existing user data:', existing)
+
+    const firstName = updateData.first_name ?? existing.first_name
+    const lastName = updateData.last_name ?? existing.last_name
+    const location = updateData.location ?? existing.location
+    const avatarUrl = updateData.avatar_url ?? existing.avatar_url
+    const phone = updateData.phone ?? existing.phone
+    const bio = updateData.bio ?? existing.bio
+    const position = updateData.position ?? existing.position
+    // Structured location
+    const locationPlaceId = available.has('location_place_id') ? (updateData.location_place_id ?? existing.location_place_id) : null
+    const locationLat = available.has('location_lat') ? (updateData.location_lat ?? existing.location_lat) : null
+    const locationLng = available.has('location_lng') ? (updateData.location_lng ?? existing.location_lng) : null
+    const locationCity = available.has('location_city') ? (updateData.location_city ?? existing.location_city) : null
+    const locationProvince = available.has('location_province') ? (updateData.location_province ?? existing.location_province) : null
+    const locationCountry = available.has('location_country') ? (updateData.location_country ?? existing.location_country) : null
+    const locationBarangay = available.has('location_barangay') ? (updateData.location_barangay ?? existing.location_barangay) : null
+    const locationRegion = available.has('location_region') ? (updateData.location_region ?? existing.location_region) : null
+
+    const gender = available.has('gender') ? (updateData.gender ?? existing.gender) : null
+    const genderCustom = available.has('gender_custom') ? (updateData.gender_custom ?? existing.gender_custom) : null
+    const username = available.has('username') ? (updateData.username ?? existing.username) : null
+    const company = available.has('company') ? (updateData.company ?? existing.company) : null
+    const adminLevel = available.has('admin_level') ? (updateData.admin_level ?? existing.admin_level) : null
+
+    console.log('🔧 Processed field values:', {
+      firstName, lastName, location, avatarUrl, phone, bio, position, gender, genderCustom, company,
+      locationPlaceId, locationLat, locationLng, locationCity, locationProvince, locationCountry
+    })
+
+
+    // Handle completed_data and birthday, preserving ability to clear birthday
+    const completedData = Object.prototype.hasOwnProperty.call(updateData, 'completed_data')
+      ? updateData.completed_data
+      : existing.completed_data
+    let birthday = Object.prototype.hasOwnProperty.call(updateData, 'birthday')
+      ? updateData.birthday
+      : existing.birthday
+    // Normalize birthday: empty strings -> null to satisfy DATE type
+    if (typeof birthday === 'string' && birthday.trim() === '') {
+      birthday = null
+    }
+
+    // Recompute full_name from first/last when applicable, otherwise keep existing
+    const recomputedFullName = `${firstName || ''} ${lastName || ''}`.trim()
+    const fullName = recomputedFullName || existing.full_name
+
+    // Use the available columns we already checked above
+    console.log('🔍 Building UPDATE query with available columns')
+
+    type Field = { col: string, val: any }
+    const baseFields: Field[] = [
+      { col: 'first_name', val: firstName },
+      { col: 'last_name', val: lastName },
+      { col: 'full_name', val: fullName },
+      { col: 'location', val: location },
+      { col: 'avatar_url', val: avatarUrl },
+      { col: 'phone', val: phone },
+      { col: 'bio', val: bio },
+      { col: 'position', val: position }
+    ]
+    const optionalFields: Field[] = []
+    if (available.has('location_place_id')) optionalFields.push({ col: 'location_place_id', val: locationPlaceId })
+    if (available.has('location_lat')) optionalFields.push({ col: 'location_lat', val: locationLat })
+    if (available.has('location_lng')) optionalFields.push({ col: 'location_lng', val: locationLng })
+    if (available.has('location_city')) optionalFields.push({ col: 'location_city', val: locationCity })
+    if (available.has('location_province')) optionalFields.push({ col: 'location_province', val: locationProvince })
+    if (available.has('location_country')) optionalFields.push({ col: 'location_country', val: locationCountry })
+    if (available.has('location_barangay')) optionalFields.push({ col: 'location_barangay', val: locationBarangay })
+    if (available.has('location_region')) optionalFields.push({ col: 'location_region', val: locationRegion })
+    if (available.has('completed_data')) optionalFields.push({ col: 'completed_data', val: completedData })
+    if (available.has('birthday')) optionalFields.push({ col: 'birthday', val: birthday })
+    if (available.has('gender')) optionalFields.push({ col: 'gender', val: gender })
+    if (available.has('gender_custom')) optionalFields.push({ col: 'gender_custom', val: genderCustom })
+    if (available.has('username')) optionalFields.push({ col: 'username', val: username })
+    if (available.has('company')) optionalFields.push({ col: 'company', val: company })
+    if (available.has('admin_level')) optionalFields.push({ col: 'admin_level', val: adminLevel })
+
+    const allFields = [...baseFields, ...optionalFields]
+    const setClauses: string[] = []
+    const params: any[] = [userId]
+    let i = 2
+    for (const f of allFields) {
+      setClauses.push(`${f.col} = $${i}`)
+      params.push(f.val)
+      i++
+    }
+    setClauses.push('updated_at = NOW()')
+
+    const updateSql = `UPDATE users SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`
+    console.log('🔧 UPDATE users dynamic SQL:', updateSql)
+    console.log('🔧 UPDATE parameters:', params)
+    
+    const result = await pool.query(updateSql, params)
+    console.log('✅ UPDATE query executed successfully')
+    console.log('🚀🚀🚀 UPDATE RESULT - Rows affected:', result.rowCount)
+    console.log('🚀🚀🚀 UPDATE RESULT - Updated user:', result.rows[0])
+
+    if (result.rows.length === 0) {
+      console.log('🚀 DEBUG: User not found in main users table, returning error')
+      console.log('❌ API: User not found for update:', userId)
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
+    console.log('🚀 DEBUG: User found in main users table, continuing...')
 
-    const existingProfile = await getProfileByCandidate(userId)
+    const updatedUser = result.rows[0]
+    console.log('✅ API: User profile updated:', {
+      id: updatedUser.id,
+      full_name: updatedUser.full_name,
+      avatar_url: updatedUser.avatar_url,
+      completed_data: updatedUser.completed_data,
+      slug: updatedUser.slug,
+      username: updatedUser.username
+    })
 
-    // Prepare update data for candidates table
-    const candidateUpdate: any = {}
-    if (updateData.first_name !== undefined) candidateUpdate.first_name = updateData.first_name
-    if (updateData.last_name !== undefined) candidateUpdate.last_name = updateData.last_name
-    if (updateData.username !== undefined) candidateUpdate.username = updateData.username
-    if (updateData.phone !== undefined) candidateUpdate.phone = updateData.phone
-    if (updateData.avatar_url !== undefined) candidateUpdate.avatar_url = updateData.avatar_url
-
-    // Prepare update data for candidate_profiles table
-    const profileUpdate: any = {}
-    if (updateData.location !== undefined) profileUpdate.location = updateData.location
-    if (updateData.position !== undefined) profileUpdate.position = updateData.position
-    if (updateData.bio !== undefined) profileUpdate.bio = updateData.bio
-    if (updateData.birthday !== undefined) {
-      profileUpdate.birthday = updateData.birthday && updateData.birthday.trim() ? updateData.birthday : null
-    }
-    if (updateData.gender !== undefined) profileUpdate.gender = updateData.gender
-    if (updateData.gender_custom !== undefined) profileUpdate.gender_custom = updateData.gender_custom
-    if (updateData.completed_data !== undefined) profileUpdate.profile_completed = updateData.completed_data
-    if (updateData.location_place_id !== undefined) profileUpdate.location_place_id = updateData.location_place_id
-    if (updateData.location_lat !== undefined) profileUpdate.location_lat = updateData.location_lat
-    if (updateData.location_lng !== undefined) profileUpdate.location_lng = updateData.location_lng
-    if (updateData.location_city !== undefined) profileUpdate.location_city = updateData.location_city
-    if (updateData.location_province !== undefined) profileUpdate.location_province = updateData.location_province
-    if (updateData.location_country !== undefined) profileUpdate.location_country = updateData.location_country
-    if (updateData.location_barangay !== undefined) profileUpdate.location_barangay = updateData.location_barangay
-    if (updateData.location_region !== undefined) profileUpdate.location_region = updateData.location_region
-    if (updateData.company !== undefined) profileUpdate.current_employer = updateData.company
-
-    // Update candidate in Supabase
-    if (Object.keys(candidateUpdate).length > 0) {
-      await updateCandidate(userId, candidateUpdate)
-      console.log('✅ Candidate updated in Supabase')
-    }
-
-    // Update profile in Supabase
-    if (Object.keys(profileUpdate).length > 0) {
-      await updateProfile(userId, profileUpdate)
-      console.log('✅ Profile updated in Supabase')
-    }
-
-    // Get updated data
-    const updatedCandidate = await getCandidateById(userId)
-    const updatedProfile = await getProfileByCandidate(userId)
-
-    if (!updatedCandidate) {
-      return NextResponse.json({ error: 'Failed to retrieve updated user' }, { status: 500 })
-    }
-
-    // Check if profile just became completed
-    const justCompleted = existingProfile?.profile_completed !== true && 
-                         (updateData.completed_data === true || profileUpdate.profile_completed === true)
+    // If profile just became completed for the first time, trigger n8n notification
+    const justCompleted =
+      existing.completed_data !== true && completedData === true
 
     if (justCompleted) {
       try {
         await notifyN8nNewUser({
-          id: updatedCandidate.id,
-          email: updatedCandidate.email,
-          full_name: updatedCandidate.full_name,
-          admin_level: null, // Candidates don't have admin_level
-          created_at: updatedCandidate.created_at,
-          slug: updatedCandidate.slug || null,
-          username: updatedCandidate.username || null
+          id: updatedUser.id,
+          email: updatedUser.email,
+          full_name: updatedUser.full_name,
+          admin_level: updatedUser.admin_level,
+          created_at: updatedUser.created_at,
+          slug: updatedUser.slug,
+          username: updatedUser.username
         })
-        console.log('✅ N8N notification sent')
       } catch (e) {
         console.error('❌ Failed to send n8n signup notification:', e)
       }
     }
 
-    // Update Supabase auth metadata
-    const firstName = candidateUpdate.first_name ?? updatedCandidate.first_name
-    const lastName = candidateUpdate.last_name ?? updatedCandidate.last_name
-    const fullName = `${firstName || ''} ${lastName || ''}`.trim() || updatedCandidate.full_name
+    console.log('🚀🚀🚀 DATABASE UPDATE COMPLETED - About to start position sync!')
 
-    try {
-      await supabaseAdmin.auth.admin.updateUserById(userId, {
-        user_metadata: {
-          first_name: firstName,
-          last_name: lastName,
-          full_name: fullName,
-          location: profileUpdate.location ?? updatedProfile?.location,
-          phone: candidateUpdate.phone ?? updatedCandidate.phone,
-          position: profileUpdate.position ?? updatedProfile?.position,
-          bio: profileUpdate.bio ?? updatedProfile?.bio,
-          company: profileUpdate.current_employer ?? updatedProfile?.current_employer
+    // Sync position changes to user_work_status table
+    if (updateData.position !== undefined) {
+      try {
+        console.log('🔄 Syncing position to work status table:', updateData.position)
+        
+        // First check if user_work_status record exists
+        const checkResult = await pool.query(
+          'SELECT user_id FROM user_work_status WHERE user_id = $1',
+          [userId]
+        )
+        
+        if (checkResult.rows.length === 0) {
+          console.log('⚠️ No user_work_status record found, creating one...')
+          // Create a new work status record with the position
+          await pool.query(
+            `INSERT INTO user_work_status (user_id, current_position, created_at, updated_at) 
+             VALUES ($1, $2, NOW(), NOW())`,
+            [userId, updateData.position]
+          )
+          console.log('✅ New user_work_status record created with position')
+        } else {
+          // Update existing record
+          const updateResult = await pool.query(
+            `UPDATE user_work_status SET current_position = $1, updated_at = NOW() WHERE user_id = $2`,
+            [updateData.position, userId]
+          )
+          console.log('✅ Position synced to work status table, rows affected:', updateResult.rowCount)
         }
-      })
-      console.log('✅ Supabase auth metadata updated')
+      } catch (error) {
+        console.log('❌ Failed to sync position to work status:', error instanceof Error ? error.message : String(error))
+        console.log('❌ Full error details:', error)
+      }
+    }
+    console.log('🚀🚀🚀 POSITION SYNC COMPLETED - About to start resume slug update!')
+
+    // Ensure saved resume slug reflects the updated first/last name
+    let resumeSlugUpdated = false
+    let newResumeSlug: string | null = null
+    try {
+      // Find the most recent saved resume for this user (if any)
+      const savedRes = await pool.query(
+        `SELECT id, resume_slug FROM saved_resumes WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1`,
+        [userId]
+      )
+      if (savedRes.rows.length > 0) {
+        const resumeId: string = savedRes.rows[0].id
+        const currentSlug: string = savedRes.rows[0].resume_slug
+
+        // Build base slug in firstName-lastName-XX format
+        const generateSlugFromUser = (firstName: string, lastName: string, uid: string) => {
+          // Clean and normalize names
+          const cleanFirst = (firstName || 'user')
+            .toLowerCase()
+            .normalize('NFD') // Decompose accented characters
+            .replace(/[\u0300-\u036f]/g, '') // Remove accent marks
+            .replace(/[^a-z0-9]/g, '') // Keep only alphanumeric
+            .slice(0, 20) // Limit length
+          
+          const cleanLast = (lastName || 'profile')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]/g, '')
+            .slice(0, 20)
+          
+          // Get last 2 digits of UID
+          const lastTwoDigits = uid.toString().slice(-2).padStart(2, '0')
+          
+          return `${cleanFirst}-${cleanLast}-${lastTwoDigits}`
+        }
+
+        // Get user's first and last name from full_name
+        const nameParts = (fullName || '').trim().split(' ')
+        const firstName = nameParts[0] || 'user'
+        const lastName = nameParts.slice(1).join(' ') || 'profile'
+        
+        const baseSlug = generateSlugFromUser(firstName, lastName, userId)
+
+        // If slug is already correct, skip
+        if (currentSlug !== baseSlug) {
+          // Ensure uniqueness
+          let candidate = baseSlug
+          let counter = 1
+          // Avoid conflicting with other rows (excluding this resume id)
+          // Try a reasonable number of attempts; collisions unlikely
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const check = await pool.query(
+              `SELECT 1 FROM saved_resumes WHERE resume_slug = $1 AND id <> $2 LIMIT 1`,
+              [candidate, resumeId]
+            )
+            if (check.rows.length === 0) break
+            candidate = `${baseSlug}-${counter}`
+            counter++
+          }
+
+          // Update saved_resumes slug
+          await pool.query(
+            `UPDATE saved_resumes SET resume_slug = $1, updated_at = NOW() WHERE id = $2`,
+            [candidate, resumeId]
+          )
+
+          // Keep applications table in sync for convenience
+          try {
+            await pool.query(
+              `UPDATE applications SET resume_slug = $1 WHERE resume_id = $2`,
+              [candidate, resumeId]
+            )
+          } catch {}
+
+          resumeSlugUpdated = true
+          newResumeSlug = candidate
+        }
+      }
+    } catch (e) {
+      console.log('⚠️ Skipping resume slug update:', e instanceof Error ? e.message : String(e))
+    }
+
+    console.log('🚀🚀🚀 BEFORE SUPABASE UPDATE - Code reached this point!')
+    // Update Supabase display name to match database
+    console.log('🚀🚀🚀 SUPABASE UPDATE STARTING - This should appear in console!')
+    console.log('🔄 Updating Supabase display name to match database...')
+    try {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+      
+      if (supabaseUrl && serviceKey) {
+        console.log('✅ Updating Supabase display name to:', fullName)
+        const supabaseAdmin = createClient(supabaseUrl, serviceKey)
+        
+        const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+          user_metadata: {
+            first_name: firstName,
+            last_name: lastName,
+            full_name: fullName,
+            location,
+            phone,
+            position,
+            bio,
+            company
+          }
+        })
+        
+        if (error) {
+          console.error('❌ Supabase update failed:', error.message)
+        } else {
+          console.log('✅ Supabase display name updated to:', data.user?.user_metadata?.full_name)
+        }
+      } else {
+        console.log('⚠️ Missing Supabase environment variables')
+      }
     } catch (error) {
-      console.error('❌ Supabase auth metadata update error:', error)
+      console.error('❌ Supabase update error:', error instanceof Error ? error.message : String(error))
     }
 
-    // Return updated user data
-    const updatedUser = {
-      id: updatedCandidate.id,
-      email: updatedCandidate.email,
-      first_name: updatedCandidate.first_name,
-      last_name: updatedCandidate.last_name,
-      full_name: updatedCandidate.full_name,
-      location: updatedProfile?.location || null,
-      avatar_url: updatedCandidate.avatar_url,
-      phone: updatedCandidate.phone,
-      bio: updatedProfile?.bio || null,
-      position: updatedProfile?.position || null,
-      completed_data: updatedProfile?.profile_completed || false,
-      birthday: updatedProfile?.birthday || null,
-      slug: updatedCandidate.slug,
-      gender: updatedProfile?.gender || null,
-      gender_custom: updatedProfile?.gender_custom || null,
-      username: updatedCandidate.username,
-      company: updatedProfile?.current_employer || null,
-      location_place_id: updatedProfile?.location_place_id || null,
-      location_lat: updatedProfile?.location_lat || null,
-      location_lng: updatedProfile?.location_lng || null,
-      location_city: updatedProfile?.location_city || null,
-      location_province: updatedProfile?.location_province || null,
-      location_country: updatedProfile?.location_country || null,
-      location_barangay: updatedProfile?.location_barangay || null,
-      location_region: updatedProfile?.location_region || null,
+    return NextResponse.json({ user: updatedUser, resumeSlugUpdated, newResumeSlug })
+      
+    } catch (dbError) {
+      console.error('❌ Database error during profile update:', dbError)
+      const dbErrorMessage = dbError instanceof Error ? dbError.message : String(dbError)
+      return NextResponse.json({ error: 'Database error during profile update', details: dbErrorMessage }, { status: 500 })
     }
-
-    console.log('✅ Profile updated successfully in SUPABASE')
-    return NextResponse.json({ user: updatedUser })
   } catch (error) {
     console.error('❌ API: Error updating user profile:', error)
     const errorMessage = error instanceof Error ? error.message : String(error)
-    return NextResponse.json({ 
-      error: 'Internal server error', 
-      details: errorMessage 
-    }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error', details: errorMessage }, { status: 500 })
   }
-}
+} 
