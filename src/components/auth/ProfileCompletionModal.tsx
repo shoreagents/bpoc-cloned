@@ -111,6 +111,13 @@ export default function ProfileCompletionModal({
   const [stepErrorBanner, setStepErrorBanner] = useState<string | null>(null)
   const [showCompletionModal, setShowCompletionModal] = useState(false)
   
+  // Calculate date 18 years ago for default birthday
+  const getDefaultBirthday = () => {
+    const date = new Date()
+    date.setFullYear(date.getFullYear() - 18)
+    return date.toISOString().split('T')[0]
+  }
+
   const [formData, setFormData] = useState<ProfileCompletionData>({
     // Step 1: Profile Information
     username: '',
@@ -120,7 +127,7 @@ export default function ProfileCompletionModal({
     phone: '',
     position: '',
     bio: '',
-    birthday: '',
+    birthday: getDefaultBirthday(), // Default to 18 years ago
     // Step 2: Work Status Information
     currentEmployer: '',
     currentPosition: '',
@@ -841,8 +848,23 @@ export default function ProfileCompletionModal({
                     const value = e.target.value
                     handleInputChange('birthday', value)
                   }}
+                  onInput={(e) => {
+                    // Allow typing - format as user types
+                    const target = e.target as HTMLInputElement
+                    let value = target.value
+                    // Remove non-numeric characters except dashes
+                    value = value.replace(/[^\d-]/g, '')
+                    // Auto-format as YYYY-MM-DD if user types
+                    if (value.length === 8 && !value.includes('-')) {
+                      value = `${value.slice(0,4)}-${value.slice(4,6)}-${value.slice(6,8)}`
+                    }
+                    if (value) {
+                      handleInputChange('birthday', value)
+                    }
+                  }}
                   max={new Date().toISOString().split('T')[0]}
                   min="1900-01-01"
+                  placeholder="YYYY-MM-DD or click calendar"
                   className={`bg-white/5 border text-white ${
                     errors.birthday ? 'border-red-400 bg-red-500/10' : 'border-white/20'
                   }`}

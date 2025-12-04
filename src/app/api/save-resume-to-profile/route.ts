@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Pool } from 'pg'
+import { saveResume, getResumeByCandidateId } from '@/lib/db/resumes'
+import { getCandidateById } from '@/lib/db/candidates'
+import { supabaseAdmin } from '@/lib/supabase/admin'
 
-// Create a connection pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-})
-
+// Save resume to profile - NOW USING SUPABASE ONLY!
 export async function POST(request: NextRequest) {
   try {
-    console.log('🔍 Starting save-resume-to-profile API call...')
+    console.log('🔍 Starting save-resume-to-profile API call (SUPABASE)...')
     
     let { 
       resumeData, 
@@ -26,8 +21,6 @@ export async function POST(request: NextRequest) {
       resumeTitle,
       resumeSlug
     })
-    console.log('📸 Profile photo in received data:', resumeData?.profilePhoto)
-    console.log('📦 Full resume data structure:', resumeData)
 
     if (!resumeData || !templateUsed || !resumeTitle) {
       console.log('❌ Missing required fields')
@@ -49,79 +42,64 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check environment variables
-    const databaseUrl = process.env.DATABASE_URL
-    
-    console.log('🔧 Environment check:', {
-      hasDatabaseUrl: !!databaseUrl,
-      databaseUrl: databaseUrl ? `${databaseUrl.substring(0, 30)}...` : 'missing'
-    })
-
-    if (!databaseUrl) {
-      console.log('❌ Missing DATABASE_URL environment variable')
+    // Verify candidate exists in Supabase
+    const candidate = await getCandidateById(userId)
+    if (!candidate) {
+      console.log('❌ Candidate not found in Supabase:', userId)
       return NextResponse.json(
-        { error: 'Database configuration error' },
-        { status: 500 }
+        { error: 'User not found in database' },
+        { status: 404 }
       )
     }
 
-    // Test database connection first
-    console.log('🧪 Testing database connection...')
-    const client = await pool.connect()
-    
-    try {
-      // Test the connection
-      const testResult = await client.query('SELECT NOW()')
-      console.log('✅ Database connection successful:', testResult.rows[0])
+    console.log('✅ Candidate found in Supabase:', candidate.full_name)
 
-      // Helper to safely extract header info from extracted JSON
-      const pickFirst = (obj: any, keys: string[]): any => {
-        if (!obj) return undefined
-        for (const k of keys) {
-          if (obj[k]) return obj[k]
-        }
-        return undefined
+    // Helper to safely extract header info from extracted JSON
+    const pickFirst = (obj: any, keys: string[]): any => {
+      if (!obj) return undefined
+      for (const k of keys) {
+        if (obj[k]) return obj[k]
       }
-      const combine = (obj: any, keys: string[]): string | undefined => {
-        const vals = keys.map(k => obj?.[k]).filter(Boolean)
-        return vals.length ? vals.join(' ') : undefined
+      return undefined
+    }
+    const combine = (obj: any, keys: string[]): string | undefined => {
+      const vals = keys.map(k => obj?.[k]).filter(Boolean)
+      return vals.length ? vals.join(' ') : undefined
+    }
+    const fromContact = (obj: any, key: string): any => obj?.contact?.[key]
+
+    const computeHeaderFromExtracted = (extracted: any) => {
+      const data = extracted || {}
+      return {
+        name:
+          pickFirst(data, ['name', 'full_name', 'fullName', 'personal_name', 'candidate_name']) ||
+          (data.first_name && data.last_name ? `${data.first_name} ${data.last_name}` : undefined) ||
+          fromContact(data, 'name') || 'Name not found',
+        title:
+          pickFirst(data, ['title', 'job_title', 'current_title']) ||
+          (Array.isArray(data.experience) && data.experience[0]?.title) || 'Title not found',
+        location:
+          pickFirst(data, ['location', 'address', 'city', 'residence', 'current_location']) ||
+          combine(data, ['city', 'country']) ||
+          fromContact(data, 'location') || 'Location not found',
+        email:
+          pickFirst(data, ['email', 'email_address', 'contact_email', 'primary_email']) ||
+          fromContact(data, 'email') || 'Email not found',
+        phone:
+          pickFirst(data, ['phone', 'phone_number', 'contact_phone', 'mobile', 'telephone']) ||
+          fromContact(data, 'phone') || 'Phone not found',
       }
-      const fromContact = (obj: any, key: string): any => obj?.contact?.[key]
+    }
 
-      const computeHeaderFromExtracted = (extracted: any) => {
-        const data = extracted || {}
-        return {
-          name:
-            pickFirst(data, ['name', 'full_name', 'fullName', 'personal_name', 'candidate_name']) ||
-            (data.first_name && data.last_name ? `${data.first_name} ${data.last_name}` : undefined) ||
-            fromContact(data, 'name') || 'Name not found',
-          title:
-            pickFirst(data, ['title', 'job_title', 'current_title']) ||
-            (Array.isArray(data.experience) && data.experience[0]?.title) || 'Title not found',
-          location:
-            pickFirst(data, ['location', 'address', 'city', 'residence', 'current_location']) ||
-            combine(data, ['city', 'country']) ||
-            fromContact(data, 'location') || 'Location not found',
-          email:
-            pickFirst(data, ['email', 'email_address', 'contact_email', 'primary_email']) ||
-            fromContact(data, 'email') || 'Email not found',
-          phone:
-            pickFirst(data, ['phone', 'phone_number', 'contact_phone', 'mobile', 'telephone']) ||
-            fromContact(data, 'phone') || 'Phone not found',
-        }
-      }
+    // If header info missing or incomplete, try to enrich from existing resume
+    let needsHeaderEnrichment = !resumeData.headerInfo ||
+      !resumeData.headerInfo.name || !resumeData.headerInfo.email || !resumeData.headerInfo.phone || !resumeData.headerInfo.location
 
-      // If header info missing or incomplete, use resumes_extracted to enrich
-      let needsHeaderEnrichment = !resumeData.headerInfo ||
-        !resumeData.headerInfo.name || !resumeData.headerInfo.email || !resumeData.headerInfo.phone || !resumeData.headerInfo.location
-
-      if (needsHeaderEnrichment) {
-        const extractedRes = await client.query(
-          'SELECT resume_data FROM resumes_extracted WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
-          [userId]
-        )
-        if (extractedRes.rows.length > 0) {
-          const extracted = extractedRes.rows[0].resume_data
+    if (needsHeaderEnrichment) {
+      try {
+        const existingResume = await getResumeByCandidateId(userId)
+        if (existingResume && existingResume.resume_data) {
+          const extracted = existingResume.resume_data
           const computedHeader = computeHeaderFromExtracted(extracted)
           resumeData = {
             ...resumeData,
@@ -130,167 +108,92 @@ export async function POST(request: NextRequest) {
               ...computedHeader
             }
           }
+          console.log('✅ Enriched header info from existing resume')
         }
+      } catch (error) {
+        console.log('⚠️ Could not enrich header from existing resume:', error)
       }
-
-      // Check if user exists and get user info
-      const userCheck = await client.query(
-        'SELECT id, first_name, last_name, full_name FROM users WHERE id = $1',
-        [userId]
-      )
-
-      if (userCheck.rows.length === 0) {
-        console.log('❌ User not found in database:', userId)
-        return NextResponse.json(
-          { error: 'User not found in database' },
-          { status: 404 }
-        )
-      }
-
-      const user = userCheck.rows[0]
-      console.log('✅ User found in database:', user.full_name)
-
-      // Helper function to generate slug in firstName-lastName-XX format
-      const generateSlugFromUser = (firstName: string, lastName: string, uid: string) => {
-        // Clean and normalize names
-        const cleanFirst = (firstName || 'user')
-          .toLowerCase()
-          .normalize('NFD') // Decompose accented characters
-          .replace(/[\u0300-\u036f]/g, '') // Remove accent marks
-          .replace(/[^a-z0-9]/g, '') // Keep only alphanumeric
-          .slice(0, 20) // Limit length
-        
-        const cleanLast = (lastName || 'profile')
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/[^a-z0-9]/g, '')
-          .slice(0, 20)
-        
-        // Get last 2 digits of UID
-        const lastTwoDigits = uid.toString().slice(-2).padStart(2, '0')
-        
-        return `${cleanFirst}-${cleanLast}-${lastTwoDigits}`
-      }
-
-      // Get the most recent generated resume ID for this user
-      const generatedResumeResult = await client.query(
-        'SELECT id FROM resumes_generated WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
-        [userId]
-      )
-      
-      const originalResumeId = generatedResumeResult.rows.length > 0 ? generatedResumeResult.rows[0].id : null
-      
-      // Check if user already has a saved resume
-      const existingResumeCheck = await client.query(
-        'SELECT id, resume_slug FROM saved_resumes WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1',
-        [userId]
-      )
-
-      let finalSlug: string
-      let savedResumeId: string
-
-      if (existingResumeCheck.rows.length > 0) {
-        // User already has a saved resume - update it
-        const existingResume = existingResumeCheck.rows[0]
-        finalSlug = existingResume.resume_slug
-        savedResumeId = existingResume.id
-        
-        console.log('🔄 Updating existing saved resume:', savedResumeId)
-        
-        // Update the existing saved resume
-        const updateResult = await client.query(
-          `UPDATE saved_resumes 
-           SET resume_title = $1, resume_data = $2, template_used = $3, original_resume_id = $4, updated_at = NOW()
-           WHERE id = $5
-           RETURNING id, resume_slug`,
-          [
-            resumeTitle,
-            JSON.stringify(resumeData),
-            templateUsed,
-            originalResumeId,
-            savedResumeId
-          ]
-        )
-        
-        console.log('✅ Existing resume updated successfully')
-      } else {
-        // User doesn't have a saved resume - create new one
-        // Use provided slug from frontend, or generate one as fallback
-        const baseSlug = resumeSlug || generateSlugFromUser(user.first_name, user.last_name, userId)
-        
-        console.log('🔧 Generating slug:', {
-          providedSlug: resumeSlug,
-          generatedSlug: !resumeSlug ? baseSlug : null,
-          firstName: user.first_name,
-          lastName: user.last_name
-        })
-
-        // Check if slug already exists
-        const slugCheck = await client.query(
-          'SELECT id FROM saved_resumes WHERE resume_slug = $1',
-          [baseSlug]
-        )
-        
-        if (slugCheck.rows.length > 0) {
-          // Slug already exists, add counter to make unique
-          let counter = 1
-          let uniqueSlug = baseSlug
-          
-          while (true) {
-            uniqueSlug = `${baseSlug}-${counter}`
-            const uniqueCheck = await client.query(
-              'SELECT id FROM saved_resumes WHERE resume_slug = $1',
-              [uniqueSlug]
-            )
-            
-            if (uniqueCheck.rows.length === 0) {
-              finalSlug = uniqueSlug
-              break
-            }
-            counter++
-          }
-        } else {
-          finalSlug = baseSlug
-        }
-
-        console.log('🆕 Creating new saved resume with slug:', finalSlug)
-        
-        // Insert new saved resume
-        const insertResult = await client.query(
-          `INSERT INTO saved_resumes (user_id, resume_slug, resume_title, resume_data, template_used, original_resume_id, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-           RETURNING id, resume_slug`,
-          [
-            userId,
-            finalSlug,
-            resumeTitle,
-            JSON.stringify(resumeData),
-            templateUsed,
-            originalResumeId
-          ]
-        )
-
-        savedResumeId = insertResult.rows[0].id
-        console.log('✅ New resume created successfully')
-      }
-
-      console.log(`💾 Resume saved to profile: ${savedResumeId}`)
-      console.log(`🔗 Resume slug: ${finalSlug}`)
-      console.log(`👤 User ID: ${userId}`)
-      console.log(`📁 Resume title: ${resumeTitle}`)
-
-      return NextResponse.json({
-        success: true,
-        savedResumeId: savedResumeId,
-        resumeSlug: finalSlug,
-        resumeUrl: `/${finalSlug}`,
-        message: 'Resume saved to profile successfully'
-      })
-
-    } finally {
-      client.release()
     }
+
+    // Generate slug if not provided
+    const generateSlugFromUser = (firstName: string, lastName: string, uid: string) => {
+      const cleanFirst = (firstName || 'user')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '')
+        .slice(0, 20)
+      
+      const cleanLast = (lastName || 'profile')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '')
+        .slice(0, 20)
+      
+      const lastTwoDigits = uid.toString().slice(-2).padStart(2, '0')
+      return `${cleanFirst}-${cleanLast}-${lastTwoDigits}`
+    }
+
+    // Use provided slug or generate one
+    let finalSlug = resumeSlug || generateSlugFromUser(candidate.first_name, candidate.last_name, userId)
+    
+    // Check if slug already exists
+    const { data: existingSlug } = await supabaseAdmin
+      .from('candidate_resumes')
+      .select('id')
+      .eq('slug', finalSlug)
+      .neq('candidate_id', userId)
+      .limit(1)
+      .single()
+
+    if (existingSlug) {
+      // Slug exists, add counter
+      let counter = 1
+      let uniqueSlug = finalSlug
+      while (true) {
+        uniqueSlug = `${finalSlug}-${counter}`
+        const { data: check } = await supabaseAdmin
+          .from('candidate_resumes')
+          .select('id')
+          .eq('slug', uniqueSlug)
+          .limit(1)
+          .single()
+        
+        if (!check) {
+          finalSlug = uniqueSlug
+          break
+        }
+        counter++
+      }
+    }
+
+    console.log('💾 Saving resume to Supabase candidate_resumes...')
+    
+    // Save resume to Supabase using the abstraction layer
+    const resume = await saveResume({
+      candidate_id: userId,
+      resume_data: resumeData,
+      original_filename: `${resumeTitle}.json`,
+      slug: finalSlug,
+      title: resumeTitle,
+      template_used: templateUsed,
+      is_primary: true,
+      is_public: false,
+    })
+
+    console.log(`✅ Resume saved to Supabase: ${resume.id}`)
+    console.log(`🔗 Resume slug: ${finalSlug}`)
+    console.log(`👤 User ID: ${userId}`)
+    console.log(`📁 Resume title: ${resumeTitle}`)
+
+    return NextResponse.json({
+      success: true,
+      savedResumeId: resume.id,
+      resumeSlug: finalSlug,
+      resumeUrl: `/${finalSlug}`,
+      message: 'Resume saved to profile successfully'
+    })
 
   } catch (error) {
     console.error('❌ Error saving resume to profile:', error)

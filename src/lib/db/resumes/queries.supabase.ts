@@ -72,6 +72,8 @@ export async function saveResume(data: {
   original_filename?: string | null
   slug?: string | null
   title?: string | null
+  template_used?: string | null
+  generation_metadata?: any
   is_primary?: boolean
   is_public?: boolean
 }): Promise<Resume> {
@@ -83,16 +85,26 @@ export async function saveResume(data: {
   const existing = await getResumeByCandidateId(data.candidate_id)
   
   // Use admin client to bypass RLS
+  const updateData: any = {
+    resume_data: data.resume_data,
+    original_filename: data.original_filename || null,
+    title: title,
+    is_primary: data.is_primary ?? true,
+    is_public: data.is_public ?? false,
+  }
+  
+  if (data.template_used !== undefined) {
+    updateData.template_used = data.template_used
+  }
+  
+  if (data.generation_metadata !== undefined) {
+    updateData.generation_metadata = data.generation_metadata
+  }
+  
   const { data: resume, error } = existing
     ? await supabaseAdmin
         .from('candidate_resumes')
-        .update({
-          resume_data: data.resume_data,
-          original_filename: data.original_filename || null,
-          title: title,
-          is_primary: data.is_primary ?? true,
-          is_public: data.is_public ?? false,
-        })
+        .update(updateData)
         .eq('candidate_id', data.candidate_id)
         .select()
         .single()
@@ -104,6 +116,8 @@ export async function saveResume(data: {
           original_filename: data.original_filename || null,
           slug: slug,
           title: title,
+          template_used: data.template_used || null,
+          generation_metadata: data.generation_metadata || null,
           is_primary: data.is_primary ?? true,
           is_public: data.is_public ?? false,
         })

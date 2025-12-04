@@ -139,20 +139,12 @@ export default function CandidateDashboardPage() {
     return null
   }
 
-  return (
-    <>
-      <ProfileCompletionModal
-        open={showProfileModal}
-        onOpenChange={setShowProfileModal}
-        userId={user.id}
-      />
-
   const completionSteps = [
     { 
       key: 'profile', 
       label: 'Complete Profile', 
       completed: stats?.profile_completion === 100,
-      href: '/settings'
+      href: '/candidate/profile'
     },
     { 
       key: 'disc', 
@@ -177,6 +169,14 @@ export default function CandidateDashboardPage() {
   const completedSteps = completionSteps.filter(s => s.completed).length
   const totalSteps = completionSteps.length
 
+  return (
+    <>
+      <ProfileCompletionModal
+        open={showProfileModal}
+        onOpenChange={setShowProfileModal}
+        userId={user.id}
+      />
+
       <div className="p-8">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
@@ -188,6 +188,42 @@ export default function CandidateDashboardPage() {
               Your career journey dashboard
             </p>
           </div>
+
+          {/* Prominent Complete Profile Banner if incomplete */}
+          {stats && stats.profile_completion < 100 && (
+            <Card className="mb-8 border-2 border-orange-300 bg-gradient-to-r from-orange-50 to-amber-50 shadow-lg">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <span className="text-orange-700">🎯 Complete Your Profile</span>
+                </CardTitle>
+                <CardDescription className="text-orange-600">
+                  Fill out your profile to get better job matches and unlock all features
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-700 mb-2">
+                      Your profile is {stats.profile_completion}% complete
+                    </p>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div 
+                        className="bg-orange-500 h-2 rounded-full transition-all"
+                        style={{ width: `${stats.profile_completion}%` }}
+                      />
+                    </div>
+                  </div>
+                  <Link href="/candidate/profile">
+                    <Button className="ml-4 bg-orange-600 hover:bg-orange-700">
+                      Complete Profile
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </Button>
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
         {/* Profile Completion Card */}
         <Card className="mb-8 border-2 border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50">
           <CardHeader>

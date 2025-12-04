@@ -45,7 +45,13 @@ export function PlacesAutocomplete({ value, placeholder, disabled, onChange, onS
   // Fetch predictions via Places (New) HTTP API
   useEffect(() => {
     let cancelled = false
-    if (!apiKey) return
+    if (!apiKey) {
+      // No API key - gracefully degrade to manual input (no autocomplete)
+      setPredictions([])
+      setOpen(false)
+      setLoading(false)
+      return
+    }
     if (!value) {
       setPredictions([])
       setOpen(false)
@@ -84,6 +90,17 @@ export function PlacesAutocomplete({ value, placeholder, disabled, onChange, onS
             }
           }),
         })
+        
+        // Handle API errors gracefully (403, etc.)
+        if (!res.ok) {
+          console.warn('Google Places API error:', res.status, res.statusText, '- Falling back to manual input')
+          if (cancelled) return
+          setPredictions([])
+          setOpen(false)
+          setLoading(false)
+          return
+        }
+        
         const data = await res.json()
         if (cancelled) return
         const suggestions: Suggestion[] = (data.suggestions || [])
@@ -94,7 +111,9 @@ export function PlacesAutocomplete({ value, placeholder, disabled, onChange, onS
           .filter((s: Suggestion) => s.place_id && s.description)
         setPredictions(suggestions)
         setOpen(suggestions.length > 0)
-      } catch {
+      } catch (error) {
+        // Gracefully handle errors - allow manual input
+        console.warn('Places autocomplete error (falling back to manual input):', error)
         setPredictions([])
         setOpen(false)
       } finally {

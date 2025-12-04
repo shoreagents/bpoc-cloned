@@ -296,12 +296,12 @@ export default function SignUpForm({ open, onOpenChange, onSwitchToLogin }: Sign
           
           console.log('✅ User auto-signed in after manual registration')
           sessionStorage.setItem('hasSignedIn', 'true')
-          sessionStorage.setItem('showProfileCompletion', 'true') // Trigger profile completion modal
+          // Don't show profile modal on signup - let them complete it on dashboard
           
           // Close the signup modal
           onOpenChange(false)
           
-          // Redirect to candidate dashboard
+          // Redirect to candidate dashboard (they'll see "Complete Profile" prompt there)
           if (typeof window !== 'undefined') {
             window.location.href = '/candidate/dashboard'
           }

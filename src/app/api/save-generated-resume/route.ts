@@ -1,17 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Pool } from 'pg'
+import { saveResume, getResumeByCandidateId } from '@/lib/db/resumes'
+import { getCandidateById, updateCandidate } from '@/lib/db/candidates'
+import { getProfileByCandidate, updateProfile } from '@/lib/db/profiles'
+import { supabaseAdmin } from '@/lib/supabase/admin'
 
-// Create a connection pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-})
-
+// Save generated resume - NOW USING SUPABASE ONLY!
 export async function POST(request: NextRequest) {
   try {
-    console.log('🔍 Starting save-generated-resume API call...')
+    console.log('🔍 Starting save-generated-resume API call (SUPABASE)...')
     
     const { 
       generatedResumeData, 
@@ -47,124 +43,71 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check environment variables
-    const databaseUrl = process.env.DATABASE_URL
-    
-    console.log('🔧 Environment check:', {
-      hasDatabaseUrl: !!databaseUrl,
-      databaseUrl: databaseUrl ? `${databaseUrl.substring(0, 30)}...` : 'missing'
-    })
-
-    if (!databaseUrl) {
-      console.log('❌ Missing DATABASE_URL environment variable')
+    // Verify candidate exists in Supabase
+    const candidate = await getCandidateById(userId)
+    if (!candidate) {
+      console.log('❌ Candidate not found in Supabase:', userId)
       return NextResponse.json(
-        { error: 'Database configuration error' },
-        { status: 500 }
+        { error: 'User not found in database' },
+        { status: 404 }
       )
     }
 
-    // Test database connection first
-    console.log('🧪 Testing database connection...')
-    const client = await pool.connect()
-    
-    try {
-      // Test the connection
-      const testResult = await client.query('SELECT NOW()')
-      console.log('✅ Database connection successful:', testResult.rows[0])
+    console.log('✅ Candidate found in Supabase')
 
-      // Check if user exists
-      const userCheck = await client.query(
-        'SELECT id FROM users WHERE id = $1',
-        [userId]
-      )
-
-      if (userCheck.rows.length === 0) {
-        console.log('❌ User not found in database:', userId)
+    // If originalResumeId is provided, verify it exists and belongs to the user
+    if (originalResumeId) {
+      const existingResume = await getResumeByCandidateId(userId)
+      if (!existingResume || existingResume.id !== originalResumeId) {
+        console.log('❌ Original resume not found or does not belong to user:', originalResumeId)
         return NextResponse.json(
-          { error: 'User not found in database' },
+          { error: 'Original resume not found or access denied' },
           { status: 404 }
         )
       }
-
-      console.log('✅ User found in database')
-
-      // If originalResumeId is provided, verify it exists and belongs to the user
-      if (originalResumeId) {
-        const originalResumeCheck = await client.query(
-          'SELECT id FROM resumes_extracted WHERE id = $1 AND user_id = $2',
-          [originalResumeId, userId]
-        )
-
-        if (originalResumeCheck.rows.length === 0) {
-          console.log('❌ Original resume not found or does not belong to user:', originalResumeId)
-          return NextResponse.json(
-            { error: 'Original resume not found or access denied' },
-            { status: 404 }
-          )
-        }
-
-        console.log('✅ Original resume verified')
-      }
-
-      // Insert the generated resume data into the database
-      console.log('💾 Upserting generated resume data (overwrite if exists)...')
-                  const upsertResult = await client.query(
-                    `INSERT INTO resumes_generated (user_id, original_resume_id, generated_resume_data, template_used, generation_metadata, updated_at)
-                     VALUES ($1, $2, $3, $4, $5, NOW())
-                     ON CONFLICT (user_id) 
-                     DO UPDATE SET 
-                       original_resume_id = EXCLUDED.original_resume_id,
-                       generated_resume_data = EXCLUDED.generated_resume_data,
-                       template_used = EXCLUDED.template_used,
-                       generation_metadata = EXCLUDED.generation_metadata,
-                       updated_at = NOW()
-                     RETURNING id`,
-                    [
-                      userId,
-                      originalResumeId || null,
-                      JSON.stringify(generatedResumeData),
-                      templateUsed || null,
-                      generationMetadata ? JSON.stringify(generationMetadata) : null
-                    ]
-                  )
-
-                  const generatedResumeId = upsertResult.rows[0].id
-                  console.log(`💾 Generated resume upserted to database: ${generatedResumeId}`)
-                  console.log(`👤 User ID: ${userId}`)
-                  console.log(`📁 Original resume ID: ${originalResumeId || 'none'}`)
-                  console.log(`🎨 Template used: ${templateUsed || 'none'}`)
-
-      // Optional: Update users.position from generated recommendation to keep consistent across views
-      try {
-        const recommendedPosition = (generatedResumeData && (
-          (generatedResumeData as any).bestJobTitle ||
-          (generatedResumeData as any).title ||
-          (generatedResumeData as any).recommendedTitle ||
-          (generatedResumeData as any).recommendedRole ||
-          ((generatedResumeData as any).summary && (generatedResumeData as any).summary.bestJobTitle)
-        )) || null
-
-        if (recommendedPosition && typeof recommendedPosition === 'string' && recommendedPosition.trim().length > 0) {
-          const newPos = recommendedPosition.trim()
-          console.log('📝 Updating users.position from generated resume recommendation:', newPos)
-          await client.query(
-            'UPDATE users SET position = $1, updated_at = NOW() WHERE id = $2',
-            [newPos, userId]
-          )
-        }
-      } catch (e) {
-        console.log('⚠️ Skipping users.position update from generated resume:', e instanceof Error ? e.message : 'unknown error')
-      }
-
-      return NextResponse.json({
-        success: true,
-        generatedResumeId: generatedResumeId,
-        message: 'Generated resume saved to database successfully'
-      })
-
-    } finally {
-      client.release()
+      console.log('✅ Original resume verified')
     }
+
+    // Save generated resume data to candidate_resumes table
+    // This updates the existing resume with generated data
+    console.log('💾 Saving generated resume to Supabase candidate_resumes...')
+    
+    const resume = await saveResume({
+      candidate_id: userId,
+      resume_data: generatedResumeData,
+      template_used: templateUsed || null,
+      generation_metadata: generationMetadata || null,
+      is_primary: true,
+      is_public: false,
+    })
+
+    console.log(`✅ Generated resume saved to Supabase: ${resume.id}`)
+
+    // Optional: Update candidate profile position from generated recommendation
+    try {
+      const recommendedPosition = (generatedResumeData && (
+        (generatedResumeData as any).bestJobTitle ||
+        (generatedResumeData as any).title ||
+        (generatedResumeData as any).recommendedTitle ||
+        (generatedResumeData as any).recommendedRole ||
+        ((generatedResumeData as any).summary && (generatedResumeData as any).summary.bestJobTitle)
+      )) || null
+
+      if (recommendedPosition && typeof recommendedPosition === 'string' && recommendedPosition.trim().length > 0) {
+        const newPos = recommendedPosition.trim()
+        console.log('📝 Updating candidate profile position from generated resume recommendation:', newPos)
+        await updateProfile(userId, { position: newPos })
+        console.log('✅ Position updated in candidate_profiles')
+      }
+    } catch (e) {
+      console.log('⚠️ Skipping position update from generated resume:', e instanceof Error ? e.message : 'unknown error')
+    }
+
+    return NextResponse.json({
+      success: true,
+      generatedResumeId: resume.id,
+      message: 'Generated resume saved to database successfully'
+    })
 
   } catch (error) {
     console.error('❌ Error saving generated resume to database:', error)
@@ -176,4 +119,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     )
   }
-} 
+}
