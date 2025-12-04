@@ -399,33 +399,33 @@ model Application {
 }
 
 model JobRequest {
-  id                     Int                     @id @default(autoincrement())
-  company_id             String?                 @db.Uuid
-  job_title              String
-  work_arrangement       work_arrangement_enum?
-  salary_min             Int?
-  salary_max             Int?
-  job_description        String
-  requirements           String[]                @default([])
-  responsibilities       String[]                @default([])
-  benefits               String[]                @default([])
-  skills                 String[]                @default([])
-  experience_level       experience_level_enum?
-  application_deadline   DateTime?               @db.Date
-  industry               String?
-  department             String?
-  work_type              String                  @default("full-time")
-  currency               String                  @default("PHP")
-  salary_type            String                  @default("monthly")
-  status                 job_status_enum         @default(active)
-  views                  Int                     @default(0)
-  applicants             Int                     @default(0)
-  created_at             DateTime                @default(now()) @db.Timestamptz(6)
-  updated_at             DateTime                @default(now()) @db.Timestamptz(6)
-  priority               priority_enum           @default(medium)
-  shift                  shift_enum              @default(day)
-  company                Member?                 @relation(fields: [company_id], references: [company_id], onUpdate: NoAction)
-  applications           Application[]
+  id                   Int                    @id @default(autoincrement())
+  company_id           String?                @db.Uuid
+  job_title            String
+  work_arrangement     work_arrangement_enum?
+  salary_min           Int?
+  salary_max           Int?
+  job_description      String
+  requirements         String[]               @default([])
+  responsibilities     String[]               @default([])
+  benefits             String[]               @default([])
+  skills               String[]               @default([])
+  experience_level     experience_level_enum?
+  application_deadline DateTime?              @db.Date
+  industry             String?
+  department           String?
+  work_type            String                 @default("full-time")
+  currency             String                 @default("PHP")
+  salary_type          String                 @default("monthly")
+  status               job_status_enum        @default(active)
+  views                Int                    @default(0)
+  applicants           Int                    @default(0)
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  priority             priority_enum          @default(medium)
+  shift                shift_enum             @default(day)
+  applications         Application[]
+  company              Member?                @relation(fields: [company_id], references: [company_id], onUpdate: NoAction)
 
   @@index([company_id], map: "idx_job_requests_company_id")
   @@index([created_at], map: "idx_job_requests_created_at")
@@ -436,13 +436,13 @@ model JobRequest {
 }
 
 model Member {
-  company                String
-  created_at             DateTime?                @default(now()) @db.Timestamp(6)
-  updated_at             DateTime?                @default(now()) @db.Timestamp(6)
-  company_id             String                   @id @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  agency_id              String?                  @db.Uuid
-  jobRequests            JobRequest[]
-  agencies               agencies?                @relation(fields: [agency_id], references: [id])
+  company     String
+  created_at  DateTime?    @default(now()) @db.Timestamp(6)
+  updated_at  DateTime?    @default(now()) @db.Timestamp(6)
+  company_id  String       @id @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agency_id   String?      @db.Uuid
+  jobRequests JobRequest[]
+  agencies    agencies?    @relation(fields: [agency_id], references: [id])
 
   @@index([agency_id], map: "idx_members_agency_id")
   @@map("members")
@@ -473,7 +473,6 @@ model agencies {
   members    Member[]
   users      User[]
 }
-
 
 enum application_status_enum {
   submitted
